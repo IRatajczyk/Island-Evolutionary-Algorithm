@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="Google.OrTools" Version="9.6.2534" />
+    <PackageReference Include="MongoDB.Driver" Version="2.19.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 

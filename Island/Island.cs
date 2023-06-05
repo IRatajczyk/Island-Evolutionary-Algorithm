@@ -2,6 +2,7 @@
 using IEA.EA.Abstraction;
 using IEA.ORTools;
 using IEA.ProblemInstance;
+using System.Threading;
 using System.Diagnostics;
 using System.Runtime.ConstrainedExecution;
 using System.Text.Json;
@@ -64,7 +65,8 @@ namespace IEA.Island
             IFitnessFunction fitnessFunction = new FitnessFunction(fitnessFunctionParameters);
             IslandParameters parameters = IslandParameters.FromJSON(json, problem);
             EvolutionaryAlgorithmParameters evolutionaryAlgorithmParameters = EvolutionaryAlgorithmParameters.FromJSON(
-                json, 
+                json,
+                problem, 
                 mutation, 
                 crossover,
                 selection, 
@@ -79,7 +81,6 @@ namespace IEA.Island
             this.Parameters = parameters;
             this.EA = new EvolutionaryAlgorithm(evolutionaryAlgorithmParameters);
             this.Solver = new ORToolsSolverWrapper(GenerateMask(), parameters.Problem);
-
         }
 
         private bool[,] GenerateMask()
@@ -110,5 +111,6 @@ namespace IEA.Island
             ea.Start();
             solver.Start();
         }
+
     }
 }

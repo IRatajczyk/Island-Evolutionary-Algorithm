@@ -3,12 +3,7 @@ using IEA.EA.Abstraction;
 using IEA.ProblemInstance;
 using IEA.EA;
 using IEA.ORTools;
+using IEA.Island;
 
-Console.WriteLine("Hello, World!");
-string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Data", "data.json");
-Problem problem = Problem.FromJSON(File.ReadAllText("C:\\Users\\igor\\Desktop\\Studia\\AiR\\Semestr8\\SR\\Projekt\\IEA\\Data\\data.json"));
-
-
-
-
-
+var island = Island.FromJSON(File.ReadAllText("./Data/IslandParams.json"));
+island.Run();

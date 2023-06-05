@@ -1,17 +1,112 @@
 ﻿using IEA.EA.Abstraction;
 using IEA.ProblemInstance;
+using MongoDB.Driver;
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization.Attributes;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System;
+using System.Globalization;
+using Newtonsoft.Json.Linq;
 
 namespace IEA.EA
 {
+
+internal class SolutionRepository
+{
+    private readonly IMongoCollection<BsonDocument> Solutions;
+    private readonly string IslandId;
+    private readonly string CoupledIslandId;
+
+    public SolutionRepository(string connectionString, string databaseName, string collectionName)
+    {
+        var client = new MongoClient(connectionString);
+        var database = client.GetDatabase(databaseName);
+
+        Solutions = database.GetCollection<BsonDocument>(collectionName);
+        IslandId = Environment.GetEnvironmentVariable("ISLAND_ID") ?? throw new ArgumentNullException("ISLAND_ID");
+        CoupledIslandId = Environment.GetEnvironmentVariable("COUPLED_ISLAND_ID") ?? throw new ArgumentNullException("COUPLED_ISLAND_ID");
+    }
+
+    public void SaveSolution(Solution solution)
+    {
+        var document = solution.ToBsonDocument();
+        document["islandId"] = IslandId;
+        document["timestamp"] = DateTimeOffset.UtcNow.ToString("yyyy:MM:dd HH:mm:ss");
+        document["alreadyMigrated"] = false;
+        Solutions.InsertOne(document);
+    }
+
+    public Solution? ReadSolution(Problem problem)
+    {
+        var filter = Builders<BsonDocument>.Filter.Eq("islandId", CoupledIslandId);
+        var documents = Solutions.Find(filter).ToList();
+
+        var sortedDocuments = documents.OrderByDescending(document => ParseDateFromDocument(document)).ToList();
+
+        if (sortedDocuments.Count > 0)
+        {
+            var latestDocument = sortedDocuments[0];
+
+            if (latestDocument.TryGetValue("alreadyMigrated", out var alreadyMigratedValue) && alreadyMigratedValue.AsBoolean)
+            {
+                return null;
+            }
+
+            var updatedDocument = new BsonDocument(latestDocument);
+            updatedDocument["alreadyMigrated"] = true;
+            var updateFilter = Builders<BsonDocument>.Filter.Eq("_id", latestDocument["_id"]);
+            Solutions.ReplaceOne(updateFilter, updatedDocument);
+
+            latestDocument.Remove("_id");
+            int[,] assignment = ParseAssignmentFromDocument(latestDocument);
+
+            return new Solution(problem, assignment);
+        }
+
+        return null;
+    }
+
+
+    private DateTime ParseDateFromDocument(BsonDocument document)
+    {
+        var timestamp = document["timestamp"].AsString;
+        return DateTime.ParseExact(timestamp, "yyyy:MM:dd HH:mm:ss", CultureInfo.InvariantCulture);
+    }
+
+    private int[,] ParseAssignmentFromDocument(BsonDocument document)
+    {
+        var json = document.ToJson();
+        var jsonDocument = JsonDocument.Parse(json);
+        var root = jsonDocument.RootElement;
+        var assignmentJsonArray = root.GetProperty("Assignment");
+        int rows = assignmentJsonArray.GetArrayLength();
+        int cols = assignmentJsonArray[0].GetArrayLength();
+
+        int[,] assignment = new int[rows, cols];
+
+        for (int i = 0; i < rows; i++)
+        {
+            for (int j = 0; j < cols; j++)
+            {
+                assignment[i, j] = assignmentJsonArray[i][j].GetInt32();
+            }
+        }
+
+        return assignment;
+    }
+}
+
+
     internal class EvolutionaryAlgorithmParameters : IEvolutionaryAlgorithmParameters
     {
         public int PopulationSize { get; }
         public int EliteCount { get; }
         public bool AllowElitism { get; }
+
+        public Problem problem { get; }
 
         public IMutation Mutation { get; }
 
@@ -33,12 +128,9 @@ namespace IEA.EA
         public double FitnessSTDThreshold { get; }
 
 
-
-
-
-
         public static EvolutionaryAlgorithmParameters FromJSON(
-            string json, 
+            string json,
+            Problem problem, 
             IMutation mutation,
             ICrossover crossover,
             ISelection selection,
@@ -55,6 +147,7 @@ namespace IEA.EA
                 parameters.GetProperty(nameof(PopulationSize)).GetInt32(),
                 parameters.GetProperty(nameof(EliteCount)).GetInt32(),
                 parameters.GetProperty(nameof(AllowElitism)).GetBoolean(),
+                problem,
                 mutation,
                 crossover,
                 selection,
@@ -68,6 +161,7 @@ namespace IEA.EA
             int populationSize,
             int eliteCount,
             bool allowElitism,
+            Problem problem,
             IMutation mutation,
             ICrossover crossover,
             ISelection selection,
@@ -85,6 +179,7 @@ namespace IEA.EA
             Genotype = genotype;
             FitnessFunction = fitnessFunction;
             Migration = migration;
+            this.problem = problem;
 
             Check();
         }
@@ -108,12 +203,15 @@ namespace IEA.EA
 
         private Solution BestSolution;
 
+        private SolutionRepository Repository;
+
         public Action<Solution>? OnMigrantsAdded { get; set; }
         public EvolutionaryAlgorithm(EvolutionaryAlgorithmParameters parameters)
         {
             Parameters = parameters;
             SolutionBuffer = new BlockingCollection<Solution>();
             MigrantsBuffer = new BlockingCollection<Solution>();
+            Repository = new SolutionRepository(Environment.GetEnvironmentVariable("MONGODB_URI"), "prod", "solutions");
         }
 
         public void AddSolution(Solution solution) => SolutionBuffer.Add(solution);
@@ -132,7 +230,7 @@ namespace IEA.EA
 
         private void SaveToDatabase(Solution solution)
         {
-            // TODO: Implement
+            Repository.SaveSolution(solution);
         }
 
 
@@ -175,6 +273,22 @@ namespace IEA.EA
             
             if (migrants.Any()) OnMigrantsAdded?.Invoke(migrants[0]);
         }
+        private void AddMigrantsToPopulation(List<Solution> population)
+        {
+            var rng = new Random();
+            
+            var incomingMigrant = Repository.ReadSolution(this.Parameters.problem);
+            if (incomingMigrant != null)
+            {
+                var randomIndex = rng.Next(population.Count);
+                population[randomIndex] = incomingMigrant;
+                Console.WriteLine("Added!");
+            }
+            else {
+                Console.WriteLine("Skipped!");
+            }
+        }
+
         public void Run()
         {
             List<Solution> population = Parameters.Genotype.GeneratePopulation(Parameters.PopulationSize);
@@ -182,7 +296,7 @@ namespace IEA.EA
             int iteration = 0;
             while(!StopCriterion(iteration, CalculateFitnessSTD(population)))
             {
-                UpdatePopulation(population);
+                AddMigrantsToPopulation(population);
 
                 Parameters.Mutation.Mutate(population);
                 List<Solution> offspring = Parameters.Crossover.Cross(population);
@@ -199,7 +313,10 @@ namespace IEA.EA
                 ManageMigrants(migrants);
 
                 iteration++;
+                Console.WriteLine(iteration);
+                
             }
         }
+
     }
 }
