@@ -282,10 +282,6 @@ internal class SolutionRepository
             {
                 var randomIndex = rng.Next(population.Count);
                 population[randomIndex] = incomingMigrant;
-                Console.WriteLine("Added!");
-            }
-            else {
-                Console.WriteLine("Skipped!");
             }
         }
 
@@ -313,7 +309,6 @@ internal class SolutionRepository
                 ManageMigrants(migrants);
 
                 iteration++;
-                Console.WriteLine(iteration);
                 
             }
         }
