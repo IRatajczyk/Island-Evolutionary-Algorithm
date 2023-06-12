@@ -1,0 +1,6 @@
+jupyter
+kubernetes
+matplotlib
+pymongo
+pandas
+ipywidgets
