@@ -9,7 +9,7 @@ Detailed problem decription can be found in presentation in *Docs* directory.
 
 Deployment process is thoroughly investigated in *deployment* directory README file.
 
-Credits to [Dominik](https://github.com/dominik-air) for prolific collaboration.
+Credits to [Dominik](https://github.com/dominik-air) for prolific collaboration, especially for distribution management.
 
 Should you have any questions please contact me directly:
 igor@ratajczyk.eu
